@@ -14,6 +14,23 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
 
+const translations = {
+  pt: {
+    home: "Início", author: "Autor", all: "Todas",
+    loading: "⏳ Carregando...", empty: "Nenhuma mensagem ainda.",
+    back: "← Voltar", reflect: "💭 Reflita sobre isso",
+    reflectQ: "Como você pode aplicar essa ideia no seu dia a dia?",
+    about: "Sobre", mission: "Missão",
+  },
+  en: {
+    home: "Home", author: "Author", all: "All",
+    loading: "⏳ Loading...", empty: "No messages yet.",
+    back: "← Back", reflect: "💭 Reflect on this",
+    reflectQ: "How can you apply this idea in your daily life?",
+    about: "About", mission: "Mission",
+  }
+};
+
 const defaultAuthor = {
   name: "Ana Beatriz Mendes",
   title: "Psicóloga & Coach de Desenvolvimento Humano",
@@ -39,12 +56,12 @@ const defaultAppearance = {
 };
 
 const defaultCategories = [
-  { id: "autoconhecimento", label: "Autoconhecimento", color: "#FF6B6B", active: true },
-  { id: "empatia", label: "Empatia", color: "#4ECDC4", active: true },
-  { id: "resiliencia", label: "Resiliência", color: "#45B7D1", active: true },
-  { id: "comunicacao", label: "Comunicação", color: "#96CEB4", active: true },
-  { id: "lideranca", label: "Liderança", color: "#FFEAA7", active: true },
-  { id: "autogestao", label: "Autogestão", color: "#DDA0DD", active: true },
+  { id: "autoconhecimento", label: "Autoconhecimento", labelEn: "Self-awareness", color: "#FF6B6B", active: true },
+  { id: "empatia", label: "Empatia", labelEn: "Empathy", color: "#4ECDC4", active: true },
+  { id: "resiliencia", label: "Resiliência", labelEn: "Resilience", color: "#45B7D1", active: true },
+  { id: "comunicacao", label: "Comunicação", labelEn: "Communication", color: "#96CEB4", active: true },
+  { id: "lideranca", label: "Liderança", labelEn: "Leadership", color: "#FFEAA7", active: true },
+  { id: "autogestao", label: "Autogestão", labelEn: "Self-management", color: "#DDA0DD", active: true },
 ];
 
 export default function App() {
@@ -56,6 +73,9 @@ export default function App() {
   const [author, setAuthor] = useState(defaultAuthor);
   const [appearance, setAppearance] = useState(defaultAppearance);
   const [categories, setCategories] = useState(defaultCategories);
+  const [lang, setLang] = useState("pt");
+
+  const t = translations[lang];
 
   useEffect(() => {
     const q = query(collection(db, "messages"), orderBy("createdAt", "desc"));
@@ -94,18 +114,21 @@ export default function App() {
           <HomeScreen messages={messages} loading={loading} activeTab={activeTab}
             setActiveTab={setActiveTab} setScreen={setScreen}
             setSelectedMessage={setSelectedMessage}
-            appearance={appearance} grad={grad} activeCats={activeCats} getCat={getCat} />
+            appearance={appearance} grad={grad} activeCats={activeCats}
+            getCat={getCat} lang={lang} setLang={setLang} t={t} />
         )}
-        {screen === "author" && <AuthorScreen author={author} grad={grad} appearance={appearance} />}
+        {screen === "author" && (
+          <AuthorScreen author={author} grad={grad} appearance={appearance} lang={lang} t={t} />
+        )}
         {screen === "detail" && selectedMessage && (
           <DetailScreen message={selectedMessage} setScreen={setScreen}
-            appearance={appearance} grad={grad} getCat={getCat} />
+            appearance={appearance} grad={grad} getCat={getCat} t={t} />
         )}
       </div>
       <div style={s.tabBar}>
         {[
-          { id: "home", icon: appearance.appIcon || "🧠", label: "Início" },
-          { id: "author", icon: "👤", label: "Autor" },
+          { id: "home", icon: appearance.appIcon || "🧠", label: t.home },
+          { id: "author", icon: "👤", label: t.author },
         ].map((tab) => (
           <button key={tab.id} onClick={() => setScreen(tab.id)}
             style={{ ...s.tabButton, color: screen === tab.id ? appearance.colorPrimary : "#9CA3AF" }}>
@@ -118,13 +141,28 @@ export default function App() {
   );
 }
 
-function HomeScreen({ messages, loading, activeTab, setActiveTab, setScreen, setSelectedMessage, appearance, grad, activeCats, getCat }) {
+function LangToggle({ lang, setLang }) {
+  return (
+    <div style={s.langToggle}>
+      <button onClick={() => setLang("pt")}
+        style={{ ...s.langBtn, opacity: lang === "pt" ? 1 : 0.4, transform: lang === "pt" ? "scale(1.15)" : "scale(1)" }}>
+        🇧🇷
+      </button>
+      <button onClick={() => setLang("en")}
+        style={{ ...s.langBtn, opacity: lang === "en" ? 1 : 0.4, transform: lang === "en" ? "scale(1.15)" : "scale(1)" }}>
+        🇺🇸
+      </button>
+    </div>
+  );
+}
+
+function HomeScreen({ messages, loading, activeTab, setActiveTab, setScreen, setSelectedMessage, appearance, grad, activeCats, getCat, lang, setLang, t }) {
   const filtered = activeTab === "todas" ? messages : messages.filter(m => m.category === activeTab);
   const cols = appearance.gridCols || 2;
 
   return (
     <div style={s.page}>
-      <div style={s.homeHeader}>
+      <div style={s.homeHeaderRow}>
         <div>
           <div style={{ ...s.appBadge, background: grad }}>
             <span style={{ fontSize: 18 }}>{appearance.appIcon || "🧠"}</span>
@@ -134,20 +172,23 @@ function HomeScreen({ messages, loading, activeTab, setActiveTab, setScreen, set
             <p style={s.homeSubtitle}>{appearance.appSubtitle}</p>
           )}
         </div>
+        <LangToggle lang={lang} setLang={setLang} />
       </div>
+
       <div style={s.categoryScroll}>
-        {[{ id: "todas", label: "Todas" }, ...activeCats].map(cat => (
+        {[{ id: "todas", label: t.all }, ...activeCats].map(cat => (
           <button key={cat.id} onClick={() => setActiveTab(cat.id)}
             style={{ ...s.categoryChip, background: activeTab === cat.id ? appearance.colorPrimary : "#F3F4F6", color: activeTab === cat.id ? "#fff" : "#6B7280" }}>
-            {cat.label}
+            {cat.id === "todas" ? t.all : (lang === "en" && cat.labelEn ? cat.labelEn : cat.label)}
           </button>
         ))}
       </div>
+
       {loading ? (
-        <div style={s.emptyBox}><p style={s.loadingText}>⏳ Carregando...</p></div>
+        <div style={s.emptyBox}><p style={s.loadingText}>{t.loading}</p></div>
       ) : filtered.length === 0 ? (
         <div style={s.emptyBox}>
-          <p style={s.emptyText}>Nenhuma mensagem ainda.</p>
+          <p style={s.emptyText}>{t.empty}</p>
         </div>
       ) : (
         <div style={{ ...s.messageGrid, gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
@@ -159,9 +200,9 @@ function HomeScreen({ messages, loading, activeTab, setActiveTab, setScreen, set
                 <div style={{ ...s.cardIconBg, background: (cat.color || msg.color) + "22" }}>
                   <span style={s.cardIcon}>{msg.icon}</span>
                 </div>
-                <p style={s.cardTitle}>{msg.title}</p>
+                <p style={s.cardTitle}>{lang === "en" && msg.titleEn ? msg.titleEn : msg.title}</p>
                 <span style={{ ...s.cardBadge, background: (cat.color || msg.color) + "22", color: cat.color || msg.color }}>
-                  {cat.label}
+                  {lang === "en" && cat.labelEn ? cat.labelEn : cat.label}
                 </span>
               </button>
             );
@@ -175,12 +216,12 @@ function HomeScreen({ messages, loading, activeTab, setActiveTab, setScreen, set
   );
 }
 
-function DetailScreen({ message, setScreen, appearance, grad, getCat }) {
+function DetailScreen({ message, setScreen, appearance, grad, getCat, t }) {
   const cat = getCat(message.category);
   return (
     <div style={s.page}>
       <div style={s.detailHeader}>
-        <button onClick={() => setScreen("home")} style={{ ...s.backButton, color: appearance.colorPrimary }}>← Voltar</button>
+        <button onClick={() => setScreen("home")} style={{ ...s.backButton, color: appearance.colorPrimary }}>{t.back}</button>
       </div>
       <div style={s.detailHero}>
         <div style={{ ...s.detailIconBg, background: (cat.color || message.color) + "22" }}>
@@ -196,14 +237,14 @@ function DetailScreen({ message, setScreen, appearance, grad, getCat }) {
         <p style={s.detailContent}>{message.content}</p>
       </div>
       <div style={{ ...s.reflectBox, background: `linear-gradient(135deg, ${appearance.colorPrimary}18, ${appearance.colorSecondary}18)` }}>
-        <p style={{ ...s.reflectTitle, color: appearance.colorPrimary }}>💭 Reflita sobre isso</p>
-        <p style={s.reflectText}>Como você pode aplicar essa ideia no seu dia a dia?</p>
+        <p style={{ ...s.reflectTitle, color: appearance.colorPrimary }}>{t.reflect}</p>
+        <p style={s.reflectText}>{t.reflectQ}</p>
       </div>
     </div>
   );
 }
 
-function AuthorScreen({ author, grad, appearance }) {
+function AuthorScreen({ author, grad, appearance, t }) {
   return (
     <div style={s.page}>
       <div style={s.authorHero}>
@@ -228,12 +269,12 @@ function AuthorScreen({ author, grad, appearance }) {
         ))}
       </div>
       <div style={s.bioCard}>
-        <p style={s.bioTitle}>Sobre</p>
+        <p style={s.bioTitle}>{t.about}</p>
         <p style={s.bioText}>{author.bio}</p>
       </div>
       <div style={{ ...s.missionCard, background: grad }}>
         <span style={{ fontSize: 28, marginBottom: 8, display: "block" }}>✨</span>
-        <p style={s.missionTitle}>Missão</p>
+        <p style={s.missionTitle}>{t.mission}</p>
         <p style={s.missionText}>"{author.mission}"</p>
       </div>
     </div>
@@ -248,10 +289,12 @@ const s = {
   tabIcon: { fontSize: 26 },
   tabLabel: { fontSize: 11, fontWeight: 600 },
   page: { padding: "20px 20px 32px" },
-  homeHeader: { marginBottom: 20 },
+  homeHeaderRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 },
   appBadge: { display: "inline-flex", alignItems: "center", gap: 8, borderRadius: 20, padding: "6px 14px", marginBottom: 6 },
   appBadgeText: { color: "#fff", fontWeight: 800, fontSize: 16, letterSpacing: -0.5 },
   homeSubtitle: { color: "#6B7280", fontSize: 13, margin: 0 },
+  langToggle: { display: "flex", gap: 6, alignItems: "center", background: "#fff", borderRadius: 20, padding: "6px 10px", boxShadow: "0 2px 8px rgba(0,0,0,0.08)" },
+  langBtn: { background: "none", border: "none", cursor: "pointer", fontSize: 22, padding: 2, transition: "all 0.2s", borderRadius: 6 },
   categoryScroll: { display: "flex", gap: 8, overflowX: "auto", marginBottom: 20, paddingBottom: 4, scrollbarWidth: "none" },
   categoryChip: { padding: "8px 16px", borderRadius: 20, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
   emptyBox: { textAlign: "center", padding: "60px 20px" },
