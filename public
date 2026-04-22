@@ -1,1 +1,34 @@
 
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1E3A5F" />
+    <meta name="description" content="Inteligência Emocional e Liderança" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="IE Liderança" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/icon-192.png" />
+    <title>Inteligência Emocional e Liderança</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body, #root {
+        height: 100%;
+        height: -webkit-fill-available;
+        width: 100%;
+        overflow: hidden;
+        background: #F0F4F8;
+      }
+      body {
+        min-height: 100vh;
+        min-height: -webkit-fill-available;
+      }
+    </style>
+  </head>
+  <body>
+    <noscript>Você precisa habilitar JavaScript para usar este app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
