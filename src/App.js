@@ -13,45 +13,37 @@ const firebaseConfig = {
 
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
+const GOOGLE_KEY = process.env.REACT_APP_GOOGLE_KEY;
 
-// ── Translation cache & helper ──────────────────────────────────────────────
-const translationCache = {};
+const cache = {};
 
 async function translateText(text, targetLang) {
   if (!text || targetLang === "pt") return text;
   const key = `${targetLang}::${text}`;
-  if (translationCache[key]) return translationCache[key];
+  if (cache[key]) return cache[key];
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const url = `https://translation.googleapis.com/language/translate/v2?key=${GOOGLE_KEY}`;
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
-        messages: [{
-          role: "user",
-          content: `Translate the following text to English. Return ONLY the translated text, nothing else:\n\n${text}`
-        }]
-      })
+      body: JSON.stringify({ q: text, source: "pt", target: targetLang, format: "text" })
     });
     const data = await res.json();
-    const translated = data?.content?.[0]?.text?.trim() || text;
-    translationCache[key] = translated;
+    const translated = data?.data?.translations?.[0]?.translatedText || text;
+    cache[key] = translated;
     return translated;
   } catch {
     return text;
   }
 }
 
-async function translateMessage(msg, lang) {
-  if (lang === "pt") return msg;
-  const [title, content] = await Promise.all([
-    translateText(msg.title, lang),
-    translateText(msg.content, lang),
-  ]);
-  return { ...msg, title, content };
+async function translateObj(obj, fields, lang) {
+  if (lang === "pt") return obj;
+  const results = await Promise.all(fields.map(f => translateText(obj[f], lang)));
+  const updated = { ...obj };
+  fields.forEach((f, i) => { updated[f] = results[i]; });
+  return updated;
 }
-// ────────────────────────────────────────────────────────────────────────────
 
 const defaultAuthor = {
   name: "Ana Beatriz Mendes",
@@ -65,16 +57,10 @@ const defaultAuthor = {
 };
 
 const defaultAppearance = {
-  appName: "IE & Liderança",
-  appSubtitle: "Inteligência Emocional & Soft Skills",
-  appIcon: "🧠",
-  footerText: "Inteligência Emocional & Liderança",
-  colorPrimary: "#1E3A5F",
-  colorSecondary: "#2E6DA4",
-  bgColor: "#F0F4F8",
-  showFooter: true,
-  showSubtitle: true,
-  gridCols: 2,
+  appName: "IE & Liderança", appSubtitle: "Inteligência Emocional & Soft Skills",
+  appIcon: "🧠", footerText: "Inteligência Emocional & Liderança",
+  colorPrimary: "#1E3A5F", colorSecondary: "#2E6DA4", bgColor: "#F0F4F8",
+  showFooter: true, showSubtitle: true, gridCols: 2,
 };
 
 const defaultCategories = [
@@ -87,20 +73,14 @@ const defaultCategories = [
 ];
 
 const ui = {
-  pt: {
-    home: "Início", author: "Autor",
-    all: "Todas", loading: "⏳ Carregando...", noMessages: "Nenhuma mensagem ainda.",
-    reflect: "💭 Reflita sobre isso",
-    reflectSub: "Como você pode aplicar essa ideia no seu dia a dia?",
-    back: "← Voltar", about: "Sobre", mission: "Missão",
-  },
-  en: {
-    home: "Home", author: "Author",
-    all: "All", loading: "⏳ Loading...", noMessages: "No messages yet.",
-    reflect: "💭 Reflect on this",
-    reflectSub: "How can you apply this idea in your daily life?",
-    back: "← Back", about: "About", mission: "Mission",
-  }
+  pt: { home: "Início", author: "Autor", all: "Todas", loading: "⏳ Carregando...",
+    translating: "⟳ Traduzindo...", noMessages: "Nenhuma mensagem ainda.",
+    reflect: "💭 Reflita sobre isso", reflectSub: "Como você pode aplicar essa ideia no seu dia a dia?",
+    back: "← Voltar", about: "Sobre", mission: "Missão" },
+  en: { home: "Home", author: "Author", all: "All", loading: "⏳ Loading...",
+    translating: "⟳ Translating...", noMessages: "No messages yet.",
+    reflect: "💭 Reflect on this", reflectSub: "How can you apply this idea in your daily life?",
+    back: "← Back", about: "About", mission: "Mission" }
 };
 
 export default function App() {
@@ -114,85 +94,50 @@ export default function App() {
   const [categories, setCategories] = useState(defaultCategories);
   const [lang, setLang] = useState("pt");
   const [translatedMessages, setTranslatedMessages] = useState([]);
-  const [translating, setTranslating] = useState(false);
   const [translatedAuthor, setTranslatedAuthor] = useState(null);
+  const [translatedCats, setTranslatedCats] = useState(null);
+  const [translating, setTranslating] = useState(false);
 
   useEffect(() => {
     const q = query(collection(db, "messages"), orderBy("createdAt", "desc"));
     return onSnapshot(q, (snap) => {
       const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setMessages(msgs);
-      setTranslatedMessages(msgs);
-      setLoading(false);
+      setMessages(msgs); setTranslatedMessages(msgs); setLoading(false);
     });
   }, []);
 
-  useEffect(() => {
-    return onSnapshot(doc(db, "config", "author"), (d) => {
-      if (d.exists()) setAuthor({ ...defaultAuthor, ...d.data() });
-    });
-  }, []);
-
-  useEffect(() => {
-    return onSnapshot(doc(db, "config", "appearance"), (d) => {
-      if (d.exists()) setAppearance({ ...defaultAppearance, ...d.data() });
-    });
-  }, []);
-
-  useEffect(() => {
-    return onSnapshot(doc(db, "config", "categories"), (d) => {
-      if (d.exists() && d.data().list) setCategories(d.data().list);
-    });
-  }, []);
+  useEffect(() => { return onSnapshot(doc(db, "config", "author"), (d) => { if (d.exists()) setAuthor({ ...defaultAuthor, ...d.data() }); }); }, []);
+  useEffect(() => { return onSnapshot(doc(db, "config", "appearance"), (d) => { if (d.exists()) setAppearance({ ...defaultAppearance, ...d.data() }); }); }, []);
+  useEffect(() => { return onSnapshot(doc(db, "config", "categories"), (d) => { if (d.exists() && d.data().list) setCategories(d.data().list); }); }, []);
 
   const switchLang = useCallback(async (newLang) => {
     if (newLang === lang) return;
     setLang(newLang);
-    if (newLang === "pt") {
-      setTranslatedMessages(messages);
-      setTranslatedAuthor(null);
-      return;
-    }
+    if (newLang === "pt") { setTranslatedMessages(messages); setTranslatedAuthor(null); setTranslatedCats(null); return; }
     setTranslating(true);
     try {
-      const [tMsgs, tTitle, tBio, tMission, tStat1, tStat2, tStat3] = await Promise.all([
-        Promise.all(messages.map(m => translateMessage(m, newLang))),
-        translateText(author.title, newLang),
-        translateText(author.bio, newLang),
-        translateText(author.mission, newLang),
-        translateText(author.stat1Label, newLang),
-        translateText(author.stat2Label, newLang),
-        translateText(author.stat3Label, newLang),
+      const [tMsgs, tAuthor, tCats] = await Promise.all([
+        Promise.all(messages.map(m => translateObj(m, ["title", "content"], newLang))),
+        translateObj(author, ["title", "bio", "mission", "stat1Label", "stat2Label", "stat3Label"], newLang),
+        Promise.all(categories.map(c => translateObj(c, ["label"], newLang))),
       ]);
-      setTranslatedMessages(tMsgs);
-      setTranslatedAuthor({
-        ...author,
-        title: tTitle, bio: tBio, mission: tMission,
-        stat1Label: tStat1, stat2Label: tStat2, stat3Label: tStat3,
-      });
-    } finally {
-      setTranslating(false);
-    }
-  }, [lang, messages, author]);
+      setTranslatedMessages(tMsgs); setTranslatedAuthor(tAuthor); setTranslatedCats(tCats);
+    } finally { setTranslating(false); }
+  }, [lang, messages, author, categories]);
 
   const displayMessages = lang === "pt" ? messages : translatedMessages;
   const displayAuthor = lang === "pt" ? author : (translatedAuthor || author);
+  const displayCats = lang === "pt" ? categories : (translatedCats || categories);
   const t = ui[lang];
-  const activeCats = categories.filter(c => c.active !== false);
-  const getCat = (id) => categories.find(c => c.id === id) || { label: id, color: "#999" };
+  const activeCats = displayCats.filter(c => c.active !== false);
+  const getCat = (id) => displayCats.find(c => c.id === id) || categories.find(c => c.id === id) || { label: id, color: "#999" };
   const grad = `linear-gradient(135deg, ${appearance.colorPrimary}, ${appearance.colorSecondary})`;
 
   const LangSwitcher = () => (
     <div style={s.langSwitcher}>
-      <button onClick={() => switchLang("pt")}
-        style={{ ...s.langBtn, opacity: lang === "pt" ? 1 : 0.45, transform: lang === "pt" ? "scale(1.15)" : "scale(1)" }}>
-        🇧🇷
-      </button>
-      <button onClick={() => switchLang("en")}
-        style={{ ...s.langBtn, opacity: lang === "en" ? 1 : 0.45, transform: lang === "en" ? "scale(1.15)" : "scale(1)" }}>
-        🇺🇸
-      </button>
-      {translating && <span style={s.translatingDot}>⟳</span>}
+      <button onClick={() => switchLang("pt")} style={{ ...s.langBtn, opacity: lang === "pt" ? 1 : 0.4, transform: lang === "pt" ? "scale(1.2)" : "scale(1)" }}>🇧🇷</button>
+      <button onClick={() => switchLang("en")} style={{ ...s.langBtn, opacity: lang === "en" ? 1 : 0.4, transform: lang === "en" ? "scale(1.2)" : "scale(1)" }}>🇺🇸</button>
+      {translating && <span style={{ fontSize: 13, color: "#6B7280" }}>⟳</span>}
     </div>
   );
 
@@ -200,27 +145,20 @@ export default function App() {
     <div style={{ ...s.root, background: appearance.bgColor }}>
       <div style={s.screen}>
         {screen === "home" && (
-          <HomeScreen messages={displayMessages} loading={loading || translating}
-            activeTab={activeTab} setActiveTab={setActiveTab}
-            setScreen={setScreen} setSelectedMessage={setSelectedMessage}
-            appearance={appearance} grad={grad} activeCats={activeCats}
-            getCat={getCat} t={t} LangSwitcher={LangSwitcher} />
+          <HomeScreen messages={displayMessages} loading={loading} translating={translating}
+            activeTab={activeTab} setActiveTab={setActiveTab} setScreen={setScreen}
+            setSelectedMessage={setSelectedMessage} appearance={appearance} grad={grad}
+            activeCats={activeCats} getCat={getCat} t={t} LangSwitcher={LangSwitcher} />
         )}
-        {screen === "author" && (
-          <AuthorScreen author={displayAuthor} grad={grad} appearance={appearance}
-            t={t} LangSwitcher={LangSwitcher} />
-        )}
+        {screen === "author" && <AuthorScreen author={displayAuthor} grad={grad} appearance={appearance} t={t} LangSwitcher={LangSwitcher} />}
         {screen === "detail" && selectedMessage && (
-          <DetailScreen message={selectedMessage} setScreen={setScreen}
-            appearance={appearance} grad={grad} getCat={getCat} t={t}
-            displayMessages={displayMessages} />
+          <DetailScreen message={selectedMessage} setScreen={setScreen} appearance={appearance}
+            grad={grad} getCat={getCat} t={t} displayMessages={displayMessages} />
         )}
       </div>
       <div style={s.tabBar}>
-        {[
-          { id: "home", icon: appearance.appIcon || "🧠", label: t.home },
-          { id: "author", icon: "👤", label: t.author },
-        ].map((tab) => (
+        {[{ id: "home", icon: appearance.appIcon || "🧠", label: t.home },
+          { id: "author", icon: "👤", label: t.author }].map((tab) => (
           <button key={tab.id} onClick={() => setScreen(tab.id)}
             style={{ ...s.tabButton, color: screen === tab.id ? appearance.colorPrimary : "#9CA3AF" }}>
             <span style={s.tabIcon}>{tab.icon}</span>
@@ -232,25 +170,21 @@ export default function App() {
   );
 }
 
-function HomeScreen({ messages, loading, activeTab, setActiveTab, setScreen, setSelectedMessage, appearance, grad, activeCats, getCat, t, LangSwitcher }) {
+function HomeScreen({ messages, loading, translating, activeTab, setActiveTab, setScreen, setSelectedMessage, appearance, grad, activeCats, getCat, t, LangSwitcher }) {
   const filtered = activeTab === "todas" ? messages : messages.filter(m => m.category === activeTab);
   const cols = appearance.gridCols || 2;
-
   return (
     <div style={s.page}>
       <div style={s.homeHeader}>
         <div>
           <div style={{ ...s.appBadge, background: grad }}>
             <span style={{ fontSize: 18 }}>{appearance.appIcon || "🧠"}</span>
-            <span style={s.appBadgeText}>{appearance.appName || "IE & Liderança"}</span>
+            <span style={s.appBadgeText}>{appearance.appName}</span>
           </div>
-          {appearance.showSubtitle !== false && (
-            <p style={s.homeSubtitle}>{appearance.appSubtitle}</p>
-          )}
+          {appearance.showSubtitle !== false && <p style={s.homeSubtitle}>{appearance.appSubtitle}</p>}
         </div>
         <LangSwitcher />
       </div>
-
       <div style={s.categoryScroll}>
         {[{ id: "todas", label: t.all }, ...activeCats].map(cat => (
           <button key={cat.id} onClick={() => setActiveTab(cat.id)}
@@ -259,9 +193,10 @@ function HomeScreen({ messages, loading, activeTab, setActiveTab, setScreen, set
           </button>
         ))}
       </div>
-
       {loading ? (
         <div style={s.emptyBox}><p style={s.loadingText}>{t.loading}</p></div>
+      ) : translating ? (
+        <div style={s.emptyBox}><p style={s.loadingText}>{t.translating}</p></div>
       ) : filtered.length === 0 ? (
         <div style={s.emptyBox}><p style={s.emptyText}>{t.noMessages}</p></div>
       ) : (
@@ -269,23 +204,16 @@ function HomeScreen({ messages, loading, activeTab, setActiveTab, setScreen, set
           {filtered.map(msg => {
             const cat = getCat(msg.category);
             return (
-              <button key={msg.id} style={s.messageCard}
-                onClick={() => { setSelectedMessage(msg); setScreen("detail"); }}>
-                <div style={{ ...s.cardIconBg, background: (cat.color || msg.color) + "22" }}>
-                  <span style={s.cardIcon}>{msg.icon}</span>
-                </div>
+              <button key={msg.id} style={s.messageCard} onClick={() => { setSelectedMessage(msg); setScreen("detail"); }}>
+                <div style={{ ...s.cardIconBg, background: (cat.color || msg.color) + "22" }}><span style={s.cardIcon}>{msg.icon}</span></div>
                 <p style={s.cardTitle}>{msg.title}</p>
-                <span style={{ ...s.cardBadge, background: (cat.color || msg.color) + "22", color: cat.color || msg.color }}>
-                  {cat.label}
-                </span>
+                <span style={{ ...s.cardBadge, background: (cat.color || msg.color) + "22", color: cat.color || msg.color }}>{cat.label}</span>
               </button>
             );
           })}
         </div>
       )}
-      {appearance.showFooter !== false && (
-        <p style={s.footerNote}>{appearance.footerText}</p>
-      )}
+      {appearance.showFooter !== false && <p style={s.footerNote}>{appearance.footerText}</p>}
     </div>
   );
 }
@@ -299,12 +227,8 @@ function DetailScreen({ message, setScreen, appearance, grad, getCat, t, display
         <button onClick={() => setScreen("home")} style={{ ...s.backButton, color: appearance.colorPrimary }}>{t.back}</button>
       </div>
       <div style={s.detailHero}>
-        <div style={{ ...s.detailIconBg, background: (cat.color || message.color) + "22" }}>
-          <span style={s.detailIcon}>{message.icon}</span>
-        </div>
-        <span style={{ ...s.detailBadge, background: (cat.color || message.color) + "22", color: cat.color || message.color }}>
-          {cat.label}
-        </span>
+        <div style={{ ...s.detailIconBg, background: (cat.color || message.color) + "22" }}><span style={s.detailIcon}>{message.icon}</span></div>
+        <span style={{ ...s.detailBadge, background: (cat.color || message.color) + "22", color: cat.color || message.color }}>{cat.label}</span>
       </div>
       <h1 style={s.detailTitle}>{displayed.title}</h1>
       <div style={s.detailCard}>
@@ -322,34 +246,23 @@ function DetailScreen({ message, setScreen, appearance, grad, getCat, t, display
 function AuthorScreen({ author, grad, appearance, t, LangSwitcher }) {
   return (
     <div style={s.page}>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-        <LangSwitcher />
-      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}><LangSwitcher /></div>
       <div style={s.authorHero}>
-        <div style={{ ...s.authorAvatarBg, boxShadow: `0 8px 24px ${appearance.colorPrimary}33` }}>
-          <span style={s.authorAvatar}>{author.avatar}</span>
-        </div>
+        <div style={{ ...s.authorAvatarBg, boxShadow: `0 8px 24px ${appearance.colorPrimary}33` }}><span style={s.authorAvatar}>{author.avatar}</span></div>
       </div>
       <div style={s.authorInfo}>
         <h1 style={s.authorName}>{author.name}</h1>
         <p style={{ ...s.authorTitle, color: appearance.colorPrimary }}>{author.title}</p>
       </div>
       <div style={s.statsRow}>
-        {[
-          { label: author.stat1Label, value: author.stat1Value },
-          { label: author.stat2Label, value: author.stat2Value },
-          { label: author.stat3Label, value: author.stat3Value },
-        ].map(st => (
+        {[{ label: author.stat1Label, value: author.stat1Value }, { label: author.stat2Label, value: author.stat2Value }, { label: author.stat3Label, value: author.stat3Value }].map(st => (
           <div key={st.label} style={s.statBox}>
             <p style={{ ...s.statValue, color: appearance.colorPrimary }}>{st.value}</p>
             <p style={s.statLabel}>{st.label}</p>
           </div>
         ))}
       </div>
-      <div style={s.bioCard}>
-        <p style={s.bioTitle}>{t.about}</p>
-        <p style={s.bioText}>{author.bio}</p>
-      </div>
+      <div style={s.bioCard}><p style={s.bioTitle}>{t.about}</p><p style={s.bioText}>{author.bio}</p></div>
       <div style={{ ...s.missionCard, background: grad }}>
         <span style={{ fontSize: 28, marginBottom: 8, display: "block" }}>✨</span>
         <p style={s.missionTitle}>{t.mission}</p>
@@ -364,8 +277,7 @@ const s = {
   screen: { flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" },
   tabBar: { height: 80, background: "rgba(255,255,255,0.97)", backdropFilter: "blur(20px)", borderTop: "1px solid #E5E7EB", display: "flex", justifyContent: "space-around", alignItems: "flex-start", paddingTop: 10, flexShrink: 0, paddingBottom: "env(safe-area-inset-bottom)" },
   tabButton: { display: "flex", flexDirection: "column", alignItems: "center", background: "none", border: "none", cursor: "pointer", gap: 3, padding: "0 40px" },
-  tabIcon: { fontSize: 26 },
-  tabLabel: { fontSize: 11, fontWeight: 600 },
+  tabIcon: { fontSize: 26 }, tabLabel: { fontSize: 11, fontWeight: 600 },
   page: { padding: "20px 20px 32px" },
   homeHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 },
   appBadge: { display: "inline-flex", alignItems: "center", gap: 8, borderRadius: 20, padding: "6px 14px", marginBottom: 6 },
@@ -373,7 +285,6 @@ const s = {
   homeSubtitle: { color: "#6B7280", fontSize: 13, margin: 0 },
   langSwitcher: { display: "flex", alignItems: "center", gap: 4, background: "rgba(255,255,255,0.9)", borderRadius: 20, padding: "4px 8px", boxShadow: "0 2px 8px rgba(0,0,0,0.08)" },
   langBtn: { background: "none", border: "none", fontSize: 22, cursor: "pointer", padding: "2px 4px", borderRadius: 8, transition: "all 0.2s" },
-  translatingDot: { fontSize: 14, color: "#6B7280" },
   categoryScroll: { display: "flex", gap: 8, overflowX: "auto", marginBottom: 20, paddingBottom: 4, scrollbarWidth: "none" },
   categoryChip: { padding: "8px 16px", borderRadius: 20, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
   emptyBox: { textAlign: "center", padding: "60px 20px" },
